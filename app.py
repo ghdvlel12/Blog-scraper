@@ -91,27 +91,47 @@ def clean_xml_to_markdown(xml_string):
     return markdownify(xml_str_mod, heading_style="ATX")
 
 def extract_content(url):
-    downloaded = trafilatura.fetch_url(url)
-    if not downloaded:
-        return None, "Error: Could not fetch URL"
+    # Fake Browser Headers
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.google.com/'
+    }
     
-    # extract with xml to keep structure
-    result = trafilatura.extract(downloaded, include_images=True, include_tables=True, output_format='xml')
-    
-    if not result:
-        return None, "Error: Could not extract content"
+    try:
+        # 1. Fetch with Requests (to look like a browser)
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        html_content = response.text
         
-    # Get Metadata (Title)
-    # Trafilatura extract doesn't return title in XML mode easily unless full doc.
-    # Let's extract metadata separately
-    meta = trafilatura.extract_metadata(downloaded)
-    title = meta.title if meta else "Untitled"
-    
-    # Convert XML to MD
-    md_content = clean_xml_to_markdown(result)
-    
-    final_md = f"# {title}\n\nURL: {url}\n\n{md_content}"
-    return final_md, None
+        # 2. Extract with Trafilatura
+        # include_images=True, include_tables=True, output_format='xml'
+        result = trafilatura.extract(html_content, include_images=True, include_tables=True, output_format='xml')
+        
+        if not result:
+             # Fallback: Try trafilatura's native fetch if requests fail to provide good content (unlikely but safe)
+             downloaded = trafilatura.fetch_url(url)
+             if downloaded:
+                 result = trafilatura.extract(downloaded, include_images=True, include_tables=True, output_format='xml')
+
+        if not result:
+            return None, "Error: Could not extract content (Bot protection active?)"
+            
+        # Get Metadata (Title)
+        # We can extract title from html_content directly or use trafilatura
+        # trafilatura.extract_metadata expects the HTML string
+        meta = trafilatura.extract_metadata(html_content)
+        title = meta.title if meta else "Untitled"
+        
+        # Convert XML to MD
+        md_content = clean_xml_to_markdown(result)
+        
+        final_md = f"# {title}\n\nURL: {url}\n\n{md_content}"
+        return final_md, None
+        
+    except Exception as e:
+        return None, f"Error fetching URL: {str(e)}"
 
 def get_google_creds():
     creds = None

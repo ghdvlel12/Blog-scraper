@@ -91,17 +91,13 @@ def clean_xml_to_markdown(xml_string):
     return markdownify(xml_str_mod, heading_style="ATX")
 
 def extract_content(url):
-    # Fake Browser Headers
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://www.google.com/'
-    }
-    
     try:
-        # 1. Fetch with Requests (to look like a browser)
-        response = requests.get(url, headers=headers, timeout=10)
+        # Use cloudscraper to bypass Cloudflare/WAF checks
+        import cloudscraper
+        scraper = cloudscraper.create_scraper() 
+        
+        # 1. Fetch with Cloudscraper
+        response = scraper.get(url, timeout=15)
         response.raise_for_status()
         html_content = response.text
         
@@ -116,7 +112,10 @@ def extract_content(url):
                  result = trafilatura.extract(downloaded, include_images=True, include_tables=True, output_format='xml')
 
         if not result:
-            return None, "Error: Could not extract content (Bot protection active?)"
+            # Let's verify what we got - maybe return a snippet of the HTML to debug if it fails again
+            soup = BeautifulSoup(html_content, 'html.parser')
+            text_preview = soup.get_text()[:500].strip()
+            return None, f"Error: Could not extract content. Site returned: {text_preview}..."
             
         # Get Metadata (Title)
         # We can extract title from html_content directly or use trafilatura

@@ -123,20 +123,33 @@ def extract_content(url):
             pass # Fail silently and try fallback
 
         # Attempt 2: Google Web Cache Fallback
-        # This is a powerful trick for static blogs
         try:
             cache_url = f"http://webcache.googleusercontent.com/search?q=cache:{url}"
             response = scraper.get(cache_url, timeout=10)
             if response.status_code == 200:
-                md, err = process_html(response.text, url)
-                if md: 
-                    # Cache usually adds a header "This is Google's cache...", might want to strip it?
-                    # Trafilatura usually handles main content well, but let's note it.
-                    return md, None
+                # Check for redirect/interstitial
+                if "please click here" not in response.text.lower() and "redirect" not in response.text.lower():
+                    md, err = process_html(response.text, url)
+                    if md: return md, None
         except:
              pass
 
-        return None, "모든 방법(Direct, Google Cache)이 차단되었습니다. 😭 해당 사이트는 스크래핑이 매우 어렵습니다."
+        # Attempt 3: Jina.ai Reader (The Ultimate Weapon)
+        # Uses an external service specialized in bypassing protections and converting to MD
+        try:
+            jina_url = f"https://r.jina.ai/{url}"
+            response = scraper.get(jina_url, timeout=20)
+            if response.status_code == 200:
+                # Jina returns pure markdown
+                jina_md = response.text
+                if "Verifying you are not a robot" not in jina_md:
+                    # Filter out Jina's own header if present (optional)
+                    final_md = f"# Scraped via Jina.ai\n\nURL: {url}\n\n{jina_md}"
+                    return final_md, None
+        except:
+            pass
+
+        return None, "모든 방법(Direct, Google Cache, Jina.ai)이 차단되었습니다. 😭 이 사이트는 정말 강력하네요."
         
     except Exception as e:
         return None, f"System Error: {str(e)}"

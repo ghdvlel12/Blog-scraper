@@ -96,17 +96,43 @@ def extract_content(url):
     
     # Helper to clean and extract
     def process_html(html_str, current_url):
-        # Check for WAF/Bot messages
-        text_check = BeautifulSoup(html_str, 'html.parser').get_text().lower()
+        soup = BeautifulSoup(html_str, 'html.parser')
+        
+        # --- TISTORY SPECIFIC CLEANING ---
+        # 1. Remove 'Category Other Posts' (카테고리의 다른 글)
+        for junk in soup.select('.another_category'):
+            junk.decompose()
+            
+        # 2. Remove Comments (댓글)
+        for junk in soup.select('.area_reply, .area_comment, .tt-reply'):
+            junk.decompose()
+
+        # 3. Remove Promotional Links (Specific Text Patterns)
+        # Identifies blocks containing specific repeated phrases
+        bad_texts = ["너무나도 중요한 소식", "쿠팡 파트너스 활동"]
+        for element in soup.find_all(['div', 'p', 'span']):
+            text = element.get_text()
+            if any(bt in text for bt in bad_texts):
+                # Double check: don't remove the whole body if it's just a small part
+                # Usually these are distinct footer blocks
+                if len(text) < 500: # Safety threshold
+                    element.decompose()
+
+        # Check for WAF/Bot messages (post-cleaning check)
+        text_check = soup.get_text().lower()
         if "verifying that you are not a robot" in text_check or "access denied" in text_check:
             return None, "Bot detection active"
             
-        result = trafilatura.extract(html_str, include_images=True, include_tables=True, output_format='xml')
+        # Pass the CLEANED html to Trafilatura
+        # We need to convert soup back to string
+        clean_html_str = str(soup)
+        
+        result = trafilatura.extract(clean_html_str, include_images=True, include_tables=True, output_format='xml')
         if not result:
             return None, "Trafilatura extraction failed"
             
         # Get Metadata
-        meta = trafilatura.extract_metadata(html_str)
+        meta = trafilatura.extract_metadata(clean_html_str)
         title = meta.title if meta else "Untitled"
         md_content = clean_xml_to_markdown(result)
         final_md = f"# {title}\n\nURL: {current_url}\n\n{md_content}"

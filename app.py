@@ -91,46 +91,55 @@ def clean_xml_to_markdown(xml_string):
     return markdownify(xml_str_mod, heading_style="ATX")
 
 def extract_content(url):
-    try:
-        # Use cloudscraper to bypass Cloudflare/WAF checks
-        import cloudscraper
-        scraper = cloudscraper.create_scraper() 
-        
-        # 1. Fetch with Cloudscraper
-        response = scraper.get(url, timeout=15)
-        response.raise_for_status()
-        html_content = response.text
-        
-        # 2. Extract with Trafilatura
-        # include_images=True, include_tables=True, output_format='xml'
-        result = trafilatura.extract(html_content, include_images=True, include_tables=True, output_format='xml')
-        
-        if not result:
-             # Fallback: Try trafilatura's native fetch if requests fail to provide good content (unlikely but safe)
-             downloaded = trafilatura.fetch_url(url)
-             if downloaded:
-                 result = trafilatura.extract(downloaded, include_images=True, include_tables=True, output_format='xml')
-
-        if not result:
-            # Let's verify what we got - maybe return a snippet of the HTML to debug if it fails again
-            soup = BeautifulSoup(html_content, 'html.parser')
-            text_preview = soup.get_text()[:500].strip()
-            return None, f"Error: Could not extract content. Site returned: {text_preview}..."
+    import cloudscraper
+    scraper = cloudscraper.create_scraper()
+    
+    # Helper to clean and extract
+    def process_html(html_str, current_url):
+        # Check for WAF/Bot messages
+        text_check = BeautifulSoup(html_str, 'html.parser').get_text().lower()
+        if "verifying that you are not a robot" in text_check or "access denied" in text_check:
+            return None, "Bot detection active"
             
-        # Get Metadata (Title)
-        # We can extract title from html_content directly or use trafilatura
-        # trafilatura.extract_metadata expects the HTML string
-        meta = trafilatura.extract_metadata(html_content)
+        result = trafilatura.extract(html_str, include_images=True, include_tables=True, output_format='xml')
+        if not result:
+            return None, "Trafilatura extraction failed"
+            
+        # Get Metadata
+        meta = trafilatura.extract_metadata(html_str)
         title = meta.title if meta else "Untitled"
-        
-        # Convert XML to MD
         md_content = clean_xml_to_markdown(result)
-        
-        final_md = f"# {title}\n\nURL: {url}\n\n{md_content}"
+        final_md = f"# {title}\n\nURL: {current_url}\n\n{md_content}"
         return final_md, None
+
+    try:
+        # Attempt 1: Direct Cloudscraper
+        try:
+            response = scraper.get(url, timeout=10)
+            if response.status_code == 200:
+                md, err = process_html(response.text, url)
+                if md: return md, None
+        except:
+            pass # Fail silently and try fallback
+
+        # Attempt 2: Google Web Cache Fallback
+        # This is a powerful trick for static blogs
+        try:
+            cache_url = f"http://webcache.googleusercontent.com/search?q=cache:{url}"
+            response = scraper.get(cache_url, timeout=10)
+            if response.status_code == 200:
+                md, err = process_html(response.text, url)
+                if md: 
+                    # Cache usually adds a header "This is Google's cache...", might want to strip it?
+                    # Trafilatura usually handles main content well, but let's note it.
+                    return md, None
+        except:
+             pass
+
+        return None, "모든 방법(Direct, Google Cache)이 차단되었습니다. 😭 해당 사이트는 스크래핑이 매우 어렵습니다."
         
     except Exception as e:
-        return None, f"Error fetching URL: {str(e)}"
+        return None, f"System Error: {str(e)}"
 
 def get_google_creds():
     creds = None

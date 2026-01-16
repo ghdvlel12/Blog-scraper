@@ -296,12 +296,24 @@ with tab2:
         else:
             with st.spinner("변환 중..."):
                 # --- Custom Cleanup for Quantified Strategies (Ctrl+A Text) ---
-                # User requested to cut off everything after "✅ 글쓴이 :  오드문드 그로에트"
-                markers = ["✅ 글쓴이 :  오드문드 그로에트", "✅ 글쓴이 : 오드문드 그로에트"] # Handle potential space variations
-                for marker in markers:
+                
+                # 1. Start Marker (Keep content AFTER this)
+                start_markers = ["에 의해\n오드문드 그로에트", "에 의해 오드문드 그로에트"] 
+                for marker in start_markers:
+                    if marker in manual_content_input:
+                        # Split by marker, keep the last part (content after header)
+                        parts = manual_content_input.split(marker)
+                        if len(parts) > 1:
+                            manual_content_input = parts[-1] 
+                            st.caption(f"✂️ '{marker.replace(chr(10), ' ')}' 이전 헤더를 잘라냈습니다.")
+                            break
+
+                # 2. End Marker (Keep content BEFORE this)
+                end_markers = ["✅ 글쓴이 :  오드문드 그로에트", "✅ 글쓴이 : 오드문드 그로에트"] 
+                for marker in end_markers:
                     if marker in manual_content_input:
                         manual_content_input = manual_content_input.split(marker)[0]
-                        st.caption(f"✂️ '{marker}' 이후 불필요한 내용을 자동으로 잘라냈습니다.")
+                        st.caption(f"✂️ '{marker}' 이후 푸터를 잘라냈습니다.")
                         break
 
                 # Try to detect if it's HTML

@@ -53,129 +53,108 @@ def clean_xml_to_markdown(xml_string):
         return ""
     
     soup = BeautifulSoup(xml_string, 'xml')
-    md_output = ""
-    
     # Trafilatura XML structure is usually <doc> or <main>
-    # We iterate over children
     root = soup.find('doc') or soup.find('main')
     if not root:
         return ""
         
-    for element in root.descendants:
-        # We only process tags, but descendants includes all. 
-        # Better strategy: iterate recursively or just linear pass if flat.
-        # Trafilatura output is relatively flat but has nesting (lists, tables).
-        # Let's use a simpler mapping strategy: direct extraction using markdownify logic wouldn't work on XML tags directly.
-        pass
-    
-    # Alternative: Trafilatura has its own 'output_format="json"' which gives structure?
-    # Or better: Trafilatura's XML is close to HTML. Let's converting XML tags to HTML tags then markdownify.
-    
     # Rename tags for markdownify
-    # <graphic src="..."> -> <img src="...">
-    # <head> -> <h3> (or similar)
-    # <p> is <p>
-    # <list> is <ul>, <item> is <li>
-    # <table> is <table>
-    
     xml_str_mod = str(root)
     xml_str_mod = xml_str_mod.replace('<graphic', '<img').replace('</graphic>', '</img>')
     xml_str_mod = xml_str_mod.replace('<head', '<h2').replace('</head>', '</h2>')
     xml_str_mod = xml_str_mod.replace('<list', '<ul').replace('</list>', '</ul>')
     xml_str_mod = xml_str_mod.replace('<item', '<li').replace('</item>', '</li>')
-    # Row/Cell mapping if needed, but trafilatura usually preserves table structure or simplifies it.
     
     # Now pass to markdownify (we need to import it)
     from markdownify import markdownify
-    # Markdownify expects HTML-like soup or string
     return markdownify(xml_str_mod, heading_style="ATX")
+
+# --- Helper Function for Cleaning & Conversion ---
+def convert_html_to_md(html_str, current_url="Manual Input"):
+    """
+    Cleans HTML (removes Tistory junk, etc.), extracts content via Trafilatura, 
+    and converts to Markdown.
+    """
+    soup = BeautifulSoup(html_str, 'html.parser')
+    
+    # --- TISTORY SPECIFIC CLEANING ---
+    # 1. Remove 'Category Other Posts' (카테고리의 다른 글)
+    for junk in soup.select('.another_category'):
+        junk.decompose()
+        
+    # 2. Remove Comments (댓글)
+    for junk in soup.select('.area_reply, .area_comment, .tt-reply'):
+        junk.decompose()
+
+    # 3. Remove Promotional Links (Specific Text Patterns)
+    bad_texts = ["너무나도 중요한 소식", "쿠팡 파트너스 활동"]
+    for element in soup.find_all(['div', 'p', 'span']):
+        text = element.get_text()
+        if any(bt in text for bt in bad_texts):
+            if len(text) < 500: # Safety threshold
+                element.decompose()
+
+    # Check for WAF/Bot messages (post-cleaning check)
+    text_check = soup.get_text().lower()
+    if "verifying that you are not a robot" in text_check or "access denied" in text_check:
+        return None, "Bot detection active"
+        
+    # Pass the CLEANED html to Trafilatura
+    clean_html_str = str(soup)
+    
+    result = trafilatura.extract(clean_html_str, include_images=True, include_tables=True, output_format='xml')
+    if not result:
+        # Fallback for plain text or simple markdown extraction if Trafilatura fails on fragments
+        return None, "Trafilatura extraction failed"
+        
+    # Get Metadata
+    meta = trafilatura.extract_metadata(clean_html_str)
+    title = meta.title if meta else "Untitled"
+    # Reuse the existing XML to MD function
+    md_content = clean_xml_to_markdown(result)
+    
+    final_md = f"# {title}\n\nURL: {current_url}\n\n{md_content}"
+    return final_md, None
+
 
 def extract_content(url):
     import cloudscraper
     scraper = cloudscraper.create_scraper()
     
-    # Helper to clean and extract
-    def process_html(html_str, current_url):
-        soup = BeautifulSoup(html_str, 'html.parser')
-        
-        # --- TISTORY SPECIFIC CLEANING ---
-        # 1. Remove 'Category Other Posts' (카테고리의 다른 글)
-        for junk in soup.select('.another_category'):
-            junk.decompose()
-            
-        # 2. Remove Comments (댓글)
-        for junk in soup.select('.area_reply, .area_comment, .tt-reply'):
-            junk.decompose()
-
-        # 3. Remove Promotional Links (Specific Text Patterns)
-        # Identifies blocks containing specific repeated phrases
-        bad_texts = ["너무나도 중요한 소식", "쿠팡 파트너스 활동"]
-        for element in soup.find_all(['div', 'p', 'span']):
-            text = element.get_text()
-            if any(bt in text for bt in bad_texts):
-                # Double check: don't remove the whole body if it's just a small part
-                # Usually these are distinct footer blocks
-                if len(text) < 500: # Safety threshold
-                    element.decompose()
-
-        # Check for WAF/Bot messages (post-cleaning check)
-        text_check = soup.get_text().lower()
-        if "verifying that you are not a robot" in text_check or "access denied" in text_check:
-            return None, "Bot detection active"
-            
-        # Pass the CLEANED html to Trafilatura
-        # We need to convert soup back to string
-        clean_html_str = str(soup)
-        
-        result = trafilatura.extract(clean_html_str, include_images=True, include_tables=True, output_format='xml')
-        if not result:
-            return None, "Trafilatura extraction failed"
-            
-        # Get Metadata
-        meta = trafilatura.extract_metadata(clean_html_str)
-        title = meta.title if meta else "Untitled"
-        md_content = clean_xml_to_markdown(result)
-        final_md = f"# {title}\n\nURL: {current_url}\n\n{md_content}"
-        return final_md, None
-
     try:
         # Attempt 1: Direct Cloudscraper
         try:
             response = scraper.get(url, timeout=10)
             if response.status_code == 200:
-                md, err = process_html(response.text, url)
+                md, err = convert_html_to_md(response.text, url)
                 if md: return md, None
         except:
-            pass # Fail silently and try fallback
+            pass 
 
         # Attempt 2: Google Web Cache Fallback
         try:
             cache_url = f"http://webcache.googleusercontent.com/search?q=cache:{url}"
             response = scraper.get(cache_url, timeout=10)
             if response.status_code == 200:
-                # Check for redirect/interstitial
                 if "please click here" not in response.text.lower() and "redirect" not in response.text.lower():
-                    md, err = process_html(response.text, url)
+                    md, err = convert_html_to_md(response.text, url)
                     if md: return md, None
         except:
              pass
 
-        # Attempt 3: Jina.ai Reader (The Ultimate Weapon)
-        # Uses an external service specialized in bypassing protections and converting to MD
+        # Attempt 3: Jina.ai Reader
         try:
             jina_url = f"https://r.jina.ai/{url}"
             response = scraper.get(jina_url, timeout=20)
             if response.status_code == 200:
-                # Jina returns pure markdown
                 jina_md = response.text
                 if "Verifying you are not a robot" not in jina_md:
-                    # Filter out Jina's own header if present (optional)
                     final_md = f"# Scraped via Jina.ai\n\nURL: {url}\n\n{jina_md}"
                     return final_md, None
         except:
             pass
 
-        return None, "모든 방법(Direct, Google Cache, Jina.ai)이 차단되었습니다. 😭 이 사이트는 정말 강력하네요."
+        return None, "모든 방법(Direct, Google Cache, Jina.ai)이 차단되었습니다. 😭 수동 입력 탭을 이용해주세요."
         
     except Exception as e:
         return None, f"System Error: {str(e)}"
@@ -246,7 +225,7 @@ def append_to_doc(md_content):
         content = doc.get('body').get('content')
         end_index = content[-1]['endIndex'] - 1
         
-        text_to_insert = "\n\n" + "-"*20 + "\n\n" + md_content
+        text_to_insert = "\\n\\n" + "-"*20 + "\\n\\n" + md_content
         
         requests = [
             {
@@ -280,54 +259,83 @@ def append_to_doc(md_content):
     except Exception as e:
         return False, f"오류 발생: {str(e)}"
 
-# --- UI ---
+# ================= MAIN UI =================
 
 st.title("🤖 Web Content Archiver to Google Drive")
-st.markdown("URL을 입력하면 내용을 추출하여 Markdown으로 변환하고, 구글 드라이브 문서에 이어붙입니다.")
+st.markdown("URL을 입력하거나 내용을 직접 붙여넣어 Google Drive에 저장하세요.")
 
-url = st.text_input("URL을 입력하세요", placeholder="https://example.com/...")
+tab1, tab2 = st.tabs(["🌐 URL 자동 분석", "✍️ 수동 입력 (HTML/텍스트)"])
 
-if 'processed_data' not in st.session_state:
-    st.session_state.processed_data = None
+# --- TAB 1: Auto Scraping ---
+with tab1:
+    url = st.text_input("URL을 입력하세요", "")
+    
+    if st.button("분석 및 변환 시작") or (url and "analyzed_url" not in st.session_state and url != ""):
+        if not url:
+            st.warning("URL을 입력해주세요.")
+        else:
+            with st.spinner(f"접속 시도 중... (Jina AI & Google Cache 가동)"):
+                md_content, error = extract_content(url)
+                
+                if md_content:
+                    st.success("변환 완료!")
+                    st.session_state['analyzed_md'] = md_content
+                    st.session_state['analyzed_url'] = url
+                else:
+                    st.error(f"실패: {error}")
 
-if st.button("분석 및 변환 시작"):
-    if url:
-        with st.spinner('웹페이지 분석 & 정제 중...'):
-            md_result, error = extract_content(url)
-            if error:
-                st.error(error)
-            else:
-                st.session_state.processed_data = md_result
-                st.success("변환 완료!")
-    else:
-        st.warning("URL을 입력해주세요.")
+# --- TAB 2: Manual Input ---
+with tab2:
+    st.info("💡 스크래핑이 안 되는 강력한 사이트는 여기서 **HTML 소스**나 **텍스트**를 직접 붙여넣으세요.")
+    manual_title_input = st.text_input("제목 (선택)", value="Manual Scraping")
+    manual_content_input = st.text_area("내용 붙여넣기 (Ctrl+A -> Ctrl+C -> Ctrl+V)", height=300, placeholder="<html>...</html> 또는 본문 텍스트")
+    
+    if st.button("수동 변환 및 프리뷰"):
+        if not manual_content_input:
+            st.warning("내용을 입력해주세요.")
+        else:
+            with st.spinner("변환 중..."):
+                # Try to detect if it's HTML
+                if "<html" in manual_content_input.lower() or "<div" in manual_content_input.lower() or "<p>" in manual_content_input.lower():
+                    # Treat as HTML
+                    md_content, error = convert_html_to_md(manual_content_input, url="Manual Input")
+                    if not md_content: # Fallback if cleaning removed everything
+                        md_content = f"# {manual_title_input}\n\n{manual_content_input}" # Just raw text
+                else:
+                    # Treat as Plain Text
+                    md_content = f"# {manual_title_input}\n\n{manual_content_input}"
+                
+                st.session_state['analyzed_md'] = md_content
+                st.session_state['analyzed_url'] = "Manual Input"
+                st.success("수동 변환 완료! 아래에서 미리보기 및 저장을 진행하세요.")
 
-if st.session_state.processed_data:
+# --- Shared Result Area (Outside Tabs) ---
+if 'analyzed_md' in st.session_state:
+    st.divider()
     st.subheader("📝 추출된 결과 미리보기")
-    st.text_area("Markdown Content", st.session_state.processed_data, height=400)
+    
+    st.text_area("Markdown Content", st.session_state['analyzed_md'], height=300)
     
     col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            label="📥 Markdown 파일 다운로드",
+            data=st.session_state['analyzed_md'],
+            file_name="scraped_content.md",
+            mime="text/markdown"
+        )
+    with col2:
+        if st.button("☁️ 구글 드라이브 추가"):
+            with st.spinner("구글 드라이브에 저장 중..."):
+                success, msg = append_to_doc(st.session_state['analyzed_md'])
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
     
-    # Download Button
-    file_name = "extracted_content.md"
-    col1.download_button(
-        label="📥 Markdown 파일 다운로드",
-        data=st.session_state.processed_data,
-        file_name=file_name,
-        mime="text/markdown"
-    )
-    
-    # Google Drive Append Button
-    if col2.button("☁️ 구글 드라이브 추가"):
-        with st.spinner('구글 드라이브에 연결 중...'):
-            success, msg = append_to_doc(st.session_state.processed_data)
-            if success:
-                st.success(f"{msg}")
-                st.balloons()
-            else:
-                st.error(f"{msg}")
-    
-    if st.button("🔄 초기화 (다음 URL)"):
-        st.session_state.processed_data = None
+    if st.button("🔄 초기화 (다음 작업)"):
+        # Clear session state
+        for key in ['analyzed_md', 'analyzed_url']:
+            if key in st.session_state:
+                del st.session_state[key]
         st.rerun()
-

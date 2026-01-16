@@ -295,6 +295,15 @@ with tab2:
             st.warning("내용을 입력해주세요.")
         else:
             with st.spinner("변환 중..."):
+                # --- Custom Cleanup for Quantified Strategies (Ctrl+A Text) ---
+                # User requested to cut off everything after "✅ 글쓴이 :  오드문드 그로에트"
+                markers = ["✅ 글쓴이 :  오드문드 그로에트", "✅ 글쓴이 : 오드문드 그로에트"] # Handle potential space variations
+                for marker in markers:
+                    if marker in manual_content_input:
+                        manual_content_input = manual_content_input.split(marker)[0]
+                        st.caption(f"✂️ '{marker}' 이후 불필요한 내용을 자동으로 잘라냈습니다.")
+                        break
+
                 # Try to detect if it's HTML
                 if "<html" in manual_content_input.lower() or "<div" in manual_content_input.lower() or "<p>" in manual_content_input.lower():
                     # Treat as HTML

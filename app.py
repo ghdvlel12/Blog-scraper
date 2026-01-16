@@ -298,7 +298,10 @@ with tab2:
                 # --- Custom Cleanup for Quantified Strategies (Ctrl+A Text) ---
                 
                 # 1. Start Marker (Keep content AFTER this)
-                start_markers = ["에 의해\n오드문드 그로에트", "에 의해 오드문드 그로에트"] 
+                start_markers = [
+                    "에 의해\n오드문드 그로에트", "에 의해 오드문드 그로에트",
+                    "By Oddmund Groette", "By\nOddmund Groette"
+                ] 
                 for marker in start_markers:
                     if marker in manual_content_input:
                         # Split by marker, keep the last part (content after header)
@@ -309,7 +312,10 @@ with tab2:
                             break
 
                 # 2. End Marker (Keep content BEFORE this)
-                end_markers = ["✅ 글쓴이 :  오드문드 그로에트", "✅ 글쓴이 : 오드문드 그로에트"] 
+                end_markers = [
+                    "✅ 글쓴이 :  오드문드 그로에트", "✅ 글쓴이 : 오드문드 그로에트",
+                    "✅ Written By: Oddmund Groette", "✅ Written By : Oddmund Groette"
+                ] 
                 for marker in end_markers:
                     if marker in manual_content_input:
                         manual_content_input = manual_content_input.split(marker)[0]
